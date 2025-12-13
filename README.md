@@ -1,8 +1,25 @@
 # Smart Connections: LM Studio Embeddings
 
-Obsidian addon plugin for **Smart Connections v4.1.4** that registers a new embedding provider backed by **LM Studio** (local HTTP API).
+This addon restores a local embedding option for the excellent **Smart Connections** plugin after a recent refactor slimmed down some built‑in providers. It hooks Smart Connections into **LM Studio’s** OpenAI‑compatible embedding API so you can keep everything on‑device while enjoying the streamlined Smart Connections experience.
 
-If “Test” works but bulk embedding doesn’t contact LM Studio, update to `0.1.2+` (this registers the adapter class into Smart Connections’ internal adapter registry used during embed queue processing).
+## How it works
+
+```mermaid
+flowchart LR
+  A[Obsidian User]
+  B[Smart Connections]
+  C[LM Studio<br/>Embeddings addon]
+  D[LM Studio<br/>/v1/models]
+  E[LM Studio<br/>/v1/embeddings]
+
+  A -->|select LM Studio provider| B
+  B -->|requests providers| C
+  C -->|registers adapter<br/>+ provider| B
+  B -->|fetch model list| D
+  B -->|embed queue items| E
+  E -->|vectors| B
+  B -->|scored results| A
+```
 
 ## Requirements
 
