@@ -1,6 +1,6 @@
 # Smart Connections: LM Studio Embeddings
 
-This addon restores a local embedding option for the excellent **Smart Connections** plugin after a recent refactor slimmed down some built‑in providers. It hooks Smart Connections into **LM Studio’s** OpenAI‑compatible embedding API so you can keep everything on‑device while enjoying the streamlined Smart Connections experience.
+This addon restores a local embedding option for the excellent **Smart Connections** plugin (https://github.com/brianpetro/obsidian-smart-connections) after a recent refactor slimmed down some built‑in providers. It hooks Smart Connections into **LM Studio’s** OpenAI‑compatible embedding API so you can keep everything on‑device while enjoying the streamlined Smart Connections experience.
 
 ## How it works
 
