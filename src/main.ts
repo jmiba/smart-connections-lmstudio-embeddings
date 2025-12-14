@@ -15,6 +15,12 @@ const DEFAULT_SETTINGS: Settings = {
   batchSize: 16
 };
 
+/**
+ * Known adapter keys that Smart Connections may use to look up the LM Studio adapter.
+ * We register under all of these to maximize compatibility.
+ */
+const ADAPTER_KEYS = ["lm_studio", "lmstudio", "lm-studio"] as const;
+
 function findSmartConnectionsPlugin(app: App) {
   try {
     const appAny = app as any;
@@ -93,7 +99,7 @@ function registerLmStudioProvider(sc: any, env: any, settings: Settings) {
   const transformersTemplate = (providers as any).transformers ?? Object.values(providers)[0] ?? {};
   const batchSize = settings?.batchSize ?? DEFAULT_SETTINGS.batchSize;
 
-  (providers as any)[targetKey] = {
+  const providerConfig = {
     ...transformersTemplate,
     ...(existing ?? {}),
 
@@ -101,9 +107,9 @@ function registerLmStudioProvider(sc: any, env: any, settings: Settings) {
     name: "LM Studio",
     label: "LM Studio",
     description: "local, requires LM Studio app",
-    adapter: "lmstudio",
-    adapter_key: "lmstudio",
-    adapterKey: "lmstudio",
+    adapter: "lm_studio",
+    adapter_key: "lm_studio",
+    adapterKey: "lm_studio",
     batch_size: batchSize,
     max_batch_size: batchSize,
 
@@ -119,44 +125,27 @@ function registerLmStudioProvider(sc: any, env: any, settings: Settings) {
     class: LmStudioEmbeddingAdapter
   };
 
-  // Back-compat: also register the short key, in case SC looks it up directly.
-  (providers as any).lmstudio = (providers as any)[targetKey];
-  (providers as any).lm_studio = (providers as any)[targetKey];
+  // Register under all known keys for maximum compatibility
+  for (const key of ADAPTER_KEYS) {
+    (providers as any)[key] = providerConfig;
+  }
 
-  // Some versions keep an additional registry under env.embedding_models.
+  // Some versions keep an additional registry under env.embedding_models.providers
   try {
     const alt = env?.embedding_models?.providers;
     if (isRecord(alt)) {
-      (alt as any)[targetKey] = (providers as any)[targetKey];
-      (alt as any).lmstudio = (providers as any)[targetKey];
-      (alt as any).lm_studio = (providers as any)[targetKey];
+      for (const key of ADAPTER_KEYS) {
+        (alt as any)[key] = providerConfig;
+      }
     }
   } catch {
     // ignore
   }
 
-  // Some versions use an adapter registry (by string key) to instantiate embed adapters,
-  // separate from the provider metadata used by the settings UI.
-  try {
-    const emb = env?.embedding_models;
-    const registries = [
-      emb?.adapters,
-      emb?.adapter_classes,
-      emb?.adapterClasses,
-      emb?.adapter_registry,
-      emb?.adapterRegistry,
-      emb?.embedding_adapters,
-      emb?.embeddingAdapters
-    ];
-    for (const reg of registries) {
-      if (!isRecord(reg)) continue;
-      (reg as any).lmstudio = LmStudioEmbeddingAdapter;
-      (reg as any).lm_studio = LmStudioEmbeddingAdapter;
-      (reg as any)["lm-studio"] = LmStudioEmbeddingAdapter;
-    }
-  } catch {
-    // ignore
-  }
+  // CRITICAL: Register the adapter CLASS in adapter registries.
+  // This is what Smart Connections uses to instantiate the adapter when loading embeddings.
+  // Without this, SC won't be able to load the adapter and will treat items as unembedded.
+  registerAdapterClass(env);
 
   // Some SC versions cache provider lists; nudging a refresh helps.
   try {
@@ -168,10 +157,53 @@ function registerLmStudioProvider(sc: any, env: any, settings: Settings) {
   }
 }
 
+/**
+ * Register the LmStudioEmbeddingAdapter class in all adapter registries that Smart Connections
+ * might use to look up adapter classes by key. This is essential for SC to recognize
+ * existing embeddings on restart.
+ */
+function registerAdapterClass(env: any) {
+  // Various places SC might store adapter classes
+  const registries = [
+    env?.embedding_models?.adapters,
+    env?.embedding_models?.adapter_classes,
+    env?.embedding_models?.adapterClasses,
+    env?.embedding_models?.adapter_registry,
+    env?.embedding_models?.adapterRegistry,
+    env?.embedding_models?.embedding_adapters,
+    env?.embedding_models?.embeddingAdapters,
+    env?.config?.modules?.smart_embed_model?.adapters,
+    env?.config?.embedding_models?.adapters,
+    // Direct on embed model
+    env?.smart_sources?.embed_model?.adapters,
+    env?.smart_blocks?.embed_model?.adapters,
+  ];
+
+  for (const reg of registries) {
+    if (!isRecord(reg)) continue;
+    for (const key of ADAPTER_KEYS) {
+      (reg as any)[key] = LmStudioEmbeddingAdapter;
+    }
+  }
+
+  // Also try to register on the SmartEmbedModel class if available
+  try {
+    const SmartEmbedModel = env?.config?.modules?.smart_embed_model?.class;
+    if (SmartEmbedModel?.adapters && isRecord(SmartEmbedModel.adapters)) {
+      for (const key of ADAPTER_KEYS) {
+        SmartEmbedModel.adapters[key] = LmStudioEmbeddingAdapter;
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
 
 export default class SmartConnectionsLmStudioEmbeddings extends Plugin {
   settings: Settings = DEFAULT_SETTINGS;
   private bootstrapped = false;
+  private registrationInterval: number | null = null;
 
   async onload() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -180,10 +212,75 @@ export default class SmartConnectionsLmStudioEmbeddings extends Plugin {
 
     new Notice(`LM Studio Embeddings loaded (v${this.manifest?.version ?? "unknown"})`);
 
-    this.bootstrap().catch((err) => console.warn("[LM Studio Embeddings] bootstrap failed", err));
+    // Try to register immediately - this may catch SC if it's already loaded
+    this.tryEarlyRegistration();
+    
+    // Set up a short polling interval to catch SC as early as possible
+    // This is critical for preventing re-embedding on restart
+    this.registrationInterval = window.setInterval(() => {
+      if (this.bootstrapped) {
+        if (this.registrationInterval) {
+          window.clearInterval(this.registrationInterval);
+          this.registrationInterval = null;
+        }
+        return;
+      }
+      this.tryEarlyRegistration();
+    }, 200);
+
+    // Also try on layout ready
     this.app.workspace.onLayoutReady(() => {
       this.bootstrap().catch((err) => console.warn("[LM Studio Embeddings] bootstrap failed", err));
     });
+    
+    // Fallback: full bootstrap with longer timeout
+    this.bootstrap().catch((err) => console.warn("[LM Studio Embeddings] bootstrap failed", err));
+  }
+
+  onunload() {
+    if (this.registrationInterval) {
+      window.clearInterval(this.registrationInterval);
+      this.registrationInterval = null;
+    }
+  }
+
+  /**
+   * Try to register the adapter as early as possible, before SC initializes entities.
+   * This is non-blocking and won't throw errors if SC isn't ready yet.
+   */
+  private tryEarlyRegistration() {
+    try {
+      const sc = findSmartConnectionsPlugin(this.app);
+      if (!sc) return false;
+      
+      const env = sc?.env;
+      if (!env) return false;
+
+      const providers = findProvidersRegistry(env);
+      if (!providers) return false;
+      
+      // SC is available - register immediately
+      registerLmStudioProvider(sc, env, this.settings);
+      registerAdapterClass(env);
+      
+      console.log("[LM Studio Embeddings] Early registration successful");
+      this.bootstrapped = true;
+      
+      if (this.registrationInterval) {
+        window.clearInterval(this.registrationInterval);
+        this.registrationInterval = null;
+      }
+      
+      // Warm model list in background
+      listModels(true).catch((err) => 
+        console.warn("[LM Studio Embeddings] Failed to list models", err)
+      );
+      
+      return true;
+    } catch (err) {
+      // Silently fail - we'll retry
+      return false;
+    }
   }
 
   private applySettings() {

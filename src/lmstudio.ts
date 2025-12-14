@@ -147,12 +147,49 @@ function estimateTokens(text: string) {
 
 export class LmStudioEmbeddingAdapter {
   static adapter = "lmstudio";
+  static key = "lm_studio"; // Used by Smart Connections to identify this adapter
   static batch_size = 16;
+  static defaults = {
+    adapter: "lm_studio",
+    description: "LM Studio local embedding model",
+    default_model: "",
+  };
   model: any;
   state: "unloaded" | "loaded" = "unloaded";
 
   constructor(model: any) {
     this.model = model;
+  }
+
+  /**
+   * The model_key getter is critical for Smart Connections.
+   * SC uses this to form the `embed_model_key` which is used to store/retrieve embeddings.
+   * Format: `{adapter_key}-{model_key}` e.g., "lm_studio-text-embedding-nomic-embed-text-v1.5"
+   * 
+   * This MUST return the same value across restarts for existing embeddings to be recognized.
+   */
+  get model_key(): string {
+    // First try to get the stored model key from model.data
+    const stored = this?.model?.data?.model_key ?? this?.model?.data?.model ?? this?.model?.settings?.model_key;
+    if (typeof stored === "string" && stored.trim()) {
+      return stored.trim();
+    }
+    // Fall back to model-level property
+    const modelLevel = this?.model?.model_key ?? this?.model?.id;
+    if (typeof modelLevel === "string" && modelLevel.trim()) {
+      return modelLevel.trim();
+    }
+    // Last resort: first available model from cache
+    const firstModel = Object.keys(cachedModels)[0];
+    return firstModel ?? "";
+  }
+
+  /**
+   * Required by Smart Connections to check if model is ready.
+   * Must return true for embeddings to be recognized on startup.
+   */
+  get is_loaded(): boolean {
+    return this.state === "loaded";
   }
 
   get models() {
@@ -181,28 +218,37 @@ export class LmStudioEmbeddingAdapter {
   }
 
   private async ensureModelKey(): Promise<string> {
-    const candidate =
-      this?.model?.data?.model_key ??
-      this?.model?.data?.model ??
-      this?.model?.data?.model_id ??
-      this?.model?.data?.id ??
-      this?.model?.model_key ??
-      this?.model?.id ??
-      null;
+    // First check if we already have a valid model key
+    const currentKey = this.model_key;
+    if (currentKey) return currentKey;
 
-    const key = typeof candidate === "string" ? candidate.trim() : "";
-    if (key) return key;
-
+    // Need to fetch models to get a fallback
     await this.get_models(true);
     const fallback = Object.keys(cachedModels)[0]?.trim() ?? "";
     if (!fallback) throw new Error("LM Studio: no models available (GET /v1/models returned empty)");
 
+    // Persist the model key so it's consistent across restarts
     if (this?.model?.data) {
       this.model.data.model_key = fallback;
       this.model.data.model = fallback;
+      // Also store adapter info for Smart Connections
+      this.model.data.adapter = "lm_studio";
       this.model.debounce_save?.();
     }
     return fallback;
+  }
+
+  /**
+   * Set the model key explicitly. Called when user selects a model.
+   * This ensures the key is persisted for recognition across restarts.
+   */
+  set_model_key(key: string) {
+    if (this?.model?.data) {
+      this.model.data.model_key = key;
+      this.model.data.model = key;
+      this.model.data.adapter = "lm_studio";
+      this.model.debounce_save?.();
+    }
   }
 
   private padToLength(vectors: number[][], targetLength: number) {
