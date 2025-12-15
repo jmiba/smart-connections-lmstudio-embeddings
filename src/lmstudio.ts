@@ -268,9 +268,19 @@ export class LmStudioEmbeddingAdapter {
     const valid = Number.isFinite(candidate) && candidate > 0 ? candidate : fallback;
     try {
       if (this?.model?.data) {
-        if (!Number.isFinite(this.model.data.batch_size) || this.model.data.batch_size <= 0) this.model.data.batch_size = valid;
-        if (!Number.isFinite(this.model.data.max_batch_size) || this.model.data.max_batch_size <= 0) this.model.data.max_batch_size = valid;
-        this.model.debounce_save?.();
+        let changed = false;
+        if (!Number.isFinite(this.model.data.batch_size) || this.model.data.batch_size <= 0) {
+          this.model.data.batch_size = valid;
+          changed = true;
+        }
+        if (!Number.isFinite(this.model.data.max_batch_size) || this.model.data.max_batch_size <= 0) {
+          this.model.data.max_batch_size = valid;
+          changed = true;
+        }
+        // Only save if we actually changed something
+        if (changed) {
+          this.model.debounce_save?.();
+        }
       }
     } catch {
       // ignore
@@ -357,11 +367,13 @@ export class LmStudioEmbeddingAdapter {
         vectors.push(...recovered);
       }
 
-      // Best-effort dims inference + persistence.
-      const inferredDims = vectors[0]?.length;
-      if (Number.isFinite(inferredDims) && this?.model?.data && !Number.isFinite(this.model.data.dims)) {
-        this.model.data.dims = inferredDims;
-        this.model.debounce_save?.();
+      // Best-effort dims inference + persistence (only on first batch, only if not already set)
+      if (vectors.length > 0 && this?.model?.data && !Number.isFinite(this.model.data.dims)) {
+        const inferredDims = vectors[0]?.length;
+        if (Number.isFinite(inferredDims) && inferredDims > 0) {
+          this.model.data.dims = inferredDims;
+          this.model.debounce_save?.();
+        }
       }
     }
 

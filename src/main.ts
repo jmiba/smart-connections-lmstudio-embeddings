@@ -147,14 +147,9 @@ function registerLmStudioProvider(sc: any, env: any, settings: Settings) {
   // Without this, SC won't be able to load the adapter and will treat items as unembedded.
   registerAdapterClass(env);
 
-  // Some SC versions cache provider lists; nudging a refresh helps.
-  try {
-    env?.embedding_models?.emit_event?.("providers-updated");
-    env?.embedding_models?.emit?.("providers-updated");
-    sc?.events?.emit?.("providers-updated");
-  } catch {
-    // ignore
-  }
+  // Note: We intentionally do NOT emit providers-updated events here.
+  // Those events can trigger model:changed notifications which confuse users.
+  // The adapter registration itself is sufficient for SC to recognize LM Studio.
 }
 
 /**
@@ -260,8 +255,8 @@ export default class SmartConnectionsLmStudioEmbeddings extends Plugin {
       if (!providers) return false;
       
       // SC is available - register immediately
+      // Note: registerLmStudioProvider already calls registerAdapterClass internally
       registerLmStudioProvider(sc, env, this.settings);
-      registerAdapterClass(env);
       
       console.log("[LM Studio Embeddings] Early registration successful");
       this.bootstrapped = true;
