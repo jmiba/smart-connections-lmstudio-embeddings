@@ -4,6 +4,6 @@
   "version": "0.1.15",
   "minAppVersion": "1.1.0",
   "description": "Addon plugin for Smart Connections that adds an LM Studio embedding provider.",
-  "author": "You",
+  "author": "Jens Mittelbach",
   "isDesktopOnly": true
 }
