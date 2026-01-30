@@ -1,4 +1,4 @@
-name: Build and Release
+name: Release
 
 on:
   push:
@@ -9,27 +9,41 @@ permissions:
   contents: write
 
 jobs:
-  build-release:
+  build-and-release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: package-lock.json
+          node-version: 20
+          cache: npm
 
-      - name: Install
+      - name: Install deps
         run: npm ci
 
       - name: Build
         run: npm run build
 
-      - name: Create GitHub Release
+      - name: Set version
+        id: vars
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare release assets
+        run: |
+          VERSION="${{ steps.vars.outputs.version }}"
+          mkdir -p release
+          cp dist/main.js release/main.js
+          cp manifest.json release/manifest.json
+          zip -j "release/smart-connections-lmstudio-embeddings-${VERSION}.zip" release/main.js release/manifest.json
+
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          generate_release_notes: true
           files: |
-            dist/main.js
-            dist/manifest.json
-            versions.json
+            release/main.js
+            release/manifest.json
+            release/smart-connections-lmstudio-embeddings-${{ steps.vars.outputs.version }}.zip
