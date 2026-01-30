@@ -1,5 +1,6 @@
 export type LmStudioSettings = {
   baseUrl: string;
+  apiKey: string;
   requestTimeoutMs: number;
   maxTokens: number;
   batchSize: number;
@@ -7,6 +8,7 @@ export type LmStudioSettings = {
 
 let settings: LmStudioSettings = {
   baseUrl: "http://127.0.0.1:1234",
+  apiKey: "",
   requestTimeoutMs: 120_000,
   maxTokens: 512,
   batchSize: 16
@@ -25,7 +27,13 @@ async function fetchJson(urlPath: string, init?: RequestInit) {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), settings.requestTimeoutMs);
   try {
-    const res = await fetch(`${baseUrl}${urlPath}`, { ...init, signal: controller.signal });
+    const headers = new Headers(init?.headers || {});
+    const apiKey = settings.apiKey?.trim();
+    if (apiKey) {
+      const bearer = apiKey.toLowerCase().startsWith("bearer ") ? apiKey : `Bearer ${apiKey}`;
+      headers.set("Authorization", bearer);
+    }
+    const res = await fetch(`${baseUrl}${urlPath}`, { ...init, headers, signal: controller.signal });
     const text = await res.text().catch(() => "");
     if (!res.ok) {
       throw new Error(`LM Studio HTTP ${res.status} ${res.statusText}${text ? `: ${text}` : ""}`);

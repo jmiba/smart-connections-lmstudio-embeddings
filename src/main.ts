@@ -3,6 +3,7 @@ import { LmStudioEmbeddingAdapter, setLmStudioSettings, listModels } from "./lms
 
 type Settings = {
   baseUrl: string;
+  apiKey: string;
   requestTimeoutMs: number;
   maxTokens: number;
   batchSize: number;
@@ -10,6 +11,7 @@ type Settings = {
 
 const DEFAULT_SETTINGS: Settings = {
   baseUrl: "http://127.0.0.1:1234",
+  apiKey: "",
   requestTimeoutMs: 120_000,
   maxTokens: 512,
   batchSize: 16
@@ -281,6 +283,7 @@ export default class SmartConnectionsLmStudioEmbeddings extends Plugin {
   private applySettings() {
     setLmStudioSettings({
       baseUrl: this.settings.baseUrl,
+      apiKey: this.settings.apiKey,
       requestTimeoutMs: this.settings.requestTimeoutMs,
       maxTokens: this.settings.maxTokens,
       batchSize: this.settings.batchSize
@@ -333,6 +336,20 @@ class LmStudioSettingsTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           })
       );
+
+    new Setting(containerEl)
+      .setName("LM Studio API key")
+      .setDesc("Optional. Sent as an Authorization: Bearer header.")
+      .addText((text) => {
+        text
+          .setPlaceholder("Optional")
+          .setValue(this.plugin.settings.apiKey)
+          .onChange(async (value) => {
+            this.plugin.settings.apiKey = value.trim();
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.type = "password";
+      });
 
     new Setting(containerEl)
       .setName("Request timeout (ms)")
