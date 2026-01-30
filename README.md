@@ -8,16 +8,18 @@ This addon restores a local embedding option for the excellent **Smart Connectio
 flowchart LR
   A[Obsidian User]
   B[Smart Connections]
-  C[LM Studio<br/>Embeddings addon]
-  D[LM Studio<br/>/v1/models]
-  E[LM Studio<br/>/v1/embeddings]
+  C[LM Studio Embeddings addon]
+  D[LM Studio API]
 
+  B -->|loads plugins| C
+  C -->|registers adapter + provider| B
   A -->|select LM Studio provider| B
-  B -->|requests providers| C
-  C -->|registers adapter<br/>+ provider| B
-  B -->|fetch model list| D
-  B -->|embed queue items| E
-  E -->|vectors| B
+  B -->|request models| C
+  C -->|GET /v1/models| D
+  B -->|embed items| C
+  C -->|POST /v1/embeddings| D
+  D -->|vectors| C
+  C -->|vectors| B
   B -->|scored results| A
 ```
 
